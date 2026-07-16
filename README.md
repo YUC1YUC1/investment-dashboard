@@ -1,16 +1,15 @@
-# V6 Professional
+# YW Wealth OS v1.0 UI Edition
 
-新增：
-- 國泰定期定額操作清單
-- VOO / QQQ 每月扣款金額
-- 本月需換美元與準備台幣
-- 建倉完成按鈕與進度中心
-- 月報
-- 換匯、交易與完整 JSON 備份
-- 房貸、資產配置與壓力測試
+本版在 V6 Professional 基礎上只新增三項外觀功能：
 
-更新：
+1. 字體大小：80%、90%、100%、110%、120%、130%、150%
+2. Light / Dark 主題
+3. 圖表大小：小、中、大
+
+外觀設定會包含在「完整 JSON 備份」中。
+
+更新方式：
 1. 解壓縮。
-2. 覆蓋 GitHub repository 內的 app.py、requirements.txt、README.md、.streamlit。
+2. 覆蓋原 GitHub repository 內的 app.py、requirements.txt、README.md 與 .streamlit。
 3. GitHub Desktop：Commit to main → Push origin。
 4. Streamlit Cloud 自動重新部署。

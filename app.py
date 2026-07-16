@@ -9,34 +9,96 @@ import yfinance as yf
 
 st.set_page_config(page_title="V6 Professional", page_icon="📊", layout="wide")
 
-st.markdown("""
-<style>
-.stApp {background:#F5F7FB;}
-.block-container {padding-top:1rem; padding-bottom:2rem;}
-[data-testid="stSidebar"] {background:#FFFFFF; border-right:1px solid #E5EAF2;}
-[data-testid="stMetric"] {
-  background:#FFFFFF; border:1px solid #E5EAF2; padding:18px;
-  border-radius:18px; box-shadow:0 8px 22px rgba(20,43,76,.06);
-}
-[data-testid="stMetricLabel"] {font-weight:700; color:#66758A;}
-[data-testid="stMetricValue"] {font-size:1.6rem; color:#183153;}
-.hero {
-  background:linear-gradient(135deg,#EDF4FF,#FFFFFF);
-  border:1px solid #D9E5FA; border-radius:22px; padding:22px 24px;
-  margin:8px 0 18px 0;
-}
-.card {
-  background:#FFFFFF; border:1px solid #E5EAF2; border-radius:18px;
-  padding:18px 20px; box-shadow:0 8px 22px rgba(20,43,76,.06);
-  margin-bottom:1rem;
-}
-.green {color:#248A57; font-weight:800;}
-.yellow {color:#C68900; font-weight:800;}
-.orange {color:#D16800; font-weight:800;}
-.red {color:#C93C3C; font-weight:800;}
-.small {color:#6B7C93; font-size:.88rem;}
-</style>
-""", unsafe_allow_html=True)
+
+def apply_theme(settings):
+    scale = float(settings.get("font_scale", 1.0))
+    mode = settings.get("theme_mode", "Light")
+    chart_size = settings.get("chart_size", "中")
+
+    if mode == "Dark":
+        bg = "#0E1117"
+        sidebar = "#141922"
+        card = "#171D27"
+        border = "#2A3442"
+        text = "#F4F7FB"
+        muted = "#AAB6C5"
+        hero1 = "#1D2A3A"
+        hero2 = "#131A24"
+    else:
+        bg = "#F5F7FB"
+        sidebar = "#FFFFFF"
+        card = "#FFFFFF"
+        border = "#E5EAF2"
+        text = "#183153"
+        muted = "#66758A"
+        hero1 = "#EDF4FF"
+        hero2 = "#FFFFFF"
+
+    chart_height = {"小": 320, "中": 460, "大": 620}.get(chart_size, 460)
+    st.session_state["chart_height"] = chart_height
+
+    st.markdown(f"""
+    <style>
+    html, body, [class*="css"] {{
+        font-size: {16*scale:.1f}px;
+    }}
+    .stApp {{background:{bg}; color:{text};}}
+    .block-container {{padding-top:1rem; padding-bottom:2rem;}}
+    [data-testid="stSidebar"] {{
+        background:{sidebar};
+        border-right:1px solid {border};
+    }}
+    [data-testid="stMetric"] {{
+        background:{card};
+        border:1px solid {border};
+        padding:{18*scale:.1f}px;
+        border-radius:18px;
+        box-shadow:0 8px 22px rgba(20,43,76,.06);
+    }}
+    [data-testid="stMetricLabel"] {{
+        font-weight:700;
+        color:{muted};
+        font-size:{0.95*scale:.2f}rem;
+    }}
+    [data-testid="stMetricValue"] {{
+        font-size:{1.60*scale:.2f}rem;
+        color:{text};
+    }}
+    .hero {{
+        background:linear-gradient(135deg,{hero1},{hero2});
+        border:1px solid {border};
+        border-radius:22px;
+        padding:{22*scale:.1f}px {24*scale:.1f}px;
+        margin:8px 0 18px 0;
+    }}
+    .card {{
+        background:{card};
+        border:1px solid {border};
+        border-radius:18px;
+        padding:{18*scale:.1f}px {20*scale:.1f}px;
+        box-shadow:0 8px 22px rgba(20,43,76,.06);
+        margin-bottom:1rem;
+    }}
+    .green {{color:#248A57; font-weight:800;}}
+    .yellow {{color:#C68900; font-weight:800;}}
+    .orange {{color:#D16800; font-weight:800;}}
+    .red {{color:#C93C3C; font-weight:800;}}
+    .small {{color:{muted}; font-size:{0.88*scale:.2f}rem;}}
+    h1 {{font-size:{2.15*scale:.2f}rem !important; color:{text};}}
+    h2 {{font-size:{1.65*scale:.2f}rem !important; color:{text};}}
+    h3 {{font-size:{1.30*scale:.2f}rem !important; color:{text};}}
+    button, input, textarea, select {{
+        font-size:{1.0*scale:.2f}rem !important;
+    }}
+    [data-testid="stTabs"] button p {{
+        font-size:{1.0*scale:.2f}rem !important;
+    }}
+    div[data-testid="stDataFrame"] {{
+        font-size:{0.95*scale:.2f}rem;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
 
 DEFAULTS = {
     "loan":12540000.0,"rate":2.5,"years":30,"grace":24,
@@ -45,6 +107,7 @@ DEFAULTS = {
     "months":6,"completed_months":0,
     "fee":0.1,"bank":"國泰世華","bank_fx":32.33,
     "fx_green":31.5,"fx_yellow":33.0,"fx_orange":34.0,
+    "font_scale":1.0,"theme_mode":"Light","chart_size":"中",
 }
 if "settings" not in st.session_state:
     st.session_state.settings = DEFAULTS.copy()
@@ -96,6 +159,10 @@ def fx_signal(fx,s):
     if fx<=s["fx_orange"]: return "橘燈","本月換匯降至 65%",.65,"orange"
     return "紅燈","非必要可延後換匯",.35,"red"
 
+def size_chart(fig):
+    fig.update_layout(height=st.session_state.get("chart_height",460))
+    return fig
+
 def save_payload():
     return {
         "settings":st.session_state.settings,
@@ -106,8 +173,23 @@ def save_payload():
 
 M=market_data()
 S=st.session_state.settings
+apply_theme(S)
 
 with st.sidebar:
+    st.header("外觀")
+    font_options = {
+        "80%":0.8,"90%":0.9,"100%":1.0,"110%":1.1,
+        "120%":1.2,"130%":1.3,"150%":1.5
+    }
+    current_label = next((k for k,v in font_options.items() if abs(v-float(S.get("font_scale",1.0)))<0.001), "100%")
+    font_label = st.selectbox("字體大小", list(font_options.keys()), index=list(font_options.keys()).index(current_label))
+    S["font_scale"] = font_options[font_label]
+    S["theme_mode"] = st.radio("主題", ["Light","Dark"], horizontal=True, index=0 if S.get("theme_mode","Light")=="Light" else 1)
+    S["chart_size"] = st.selectbox("圖表大小", ["小","中","大"], index=["小","中","大"].index(S.get("chart_size","中")))
+    st.session_state.settings = S
+    st.caption("外觀設定會包含在完整 JSON 備份中。")
+
+    st.divider()
     st.header("核心設定")
     S["loan"]=st.number_input("貸款本金",value=float(S["loan"]),step=100000.0)
     S["rate"]=st.number_input("年利率（%）",value=float(S["rate"]),step=.05)
@@ -193,7 +275,7 @@ for col,key in zip(market_cols,["VOO","QQQ","0050","USD/TWD","S&P500"]):
     p,ch=M[key]["price"],M[key]["change"]
     col.metric(key,"暫無資料" if p is None else f"{p:,.2f}",None if ch is None else f"{ch:+.2%}")
 
-tabs=st.tabs(["指揮中心","國泰操作清單","進度中心","換匯紀錄","交易帳本","資產配置","房貸","壓力測試","月報"])
+tabs=st.tabs(["🏠 指揮中心","💳 國泰操作清單","📅 進度中心","💵 換匯紀錄","📒 交易帳本","📊 資產配置","🏦 房貸","⚠️ 壓力測試","🗓️ 月報"])
 
 with tabs[0]:
     c=st.columns(4)
@@ -290,12 +372,12 @@ with tabs[5]:
         rows.append([k,v,cur,targets[k],diff,action])
     df=pd.DataFrame(rows,columns=["資產","市值","目前比例","目標比例","偏離","建議"])
     st.dataframe(df,use_container_width=True,hide_index=True)
-    st.plotly_chart(px.pie(df,values="市值",names="資產",hole=.5,title="資產配置"),use_container_width=True)
+    st.plotly_chart(size_chart(px.pie(df,values="市值",names="資產",hole=.5,title="資產配置")),use_container_width=True)
 
 with tabs[6]:
     A=amortization(S["loan"],annual,S["years"]*12,S["grace"])
     yearly=A.assign(年度=((A["月份"]-1)//12)+1).groupby("年度",as_index=False).agg({"利息":"sum","本金":"sum","月付金":"sum","期末本金":"last"})
-    st.plotly_chart(px.line(yearly,x="年度",y="期末本金",title="房貸餘額"),use_container_width=True)
+    st.plotly_chart(size_chart(px.line(yearly,x="年度",y="期末本金",title="房貸餘額")),use_container_width=True)
     st.dataframe(yearly,use_container_width=True,hide_index=True)
 
 with tabs[7]:
@@ -305,7 +387,7 @@ with tabs[7]:
         rows.append([drop,assets,assets-S["loan"],assets/S["loan"]])
     df=pd.DataFrame(rows,columns=["市場跌幅","總資產","淨資產","資產/貸款"])
     st.dataframe(df,use_container_width=True,hide_index=True)
-    st.plotly_chart(px.bar(df,x="市場跌幅",y="淨資產",title="市場下跌壓力"),use_container_width=True)
+    st.plotly_chart(size_chart(px.bar(df,x="市場跌幅",y="淨資產",title="市場下跌壓力")),use_container_width=True)
 
 with tabs[8]:
     L=ledger(st.session_state.trades)
