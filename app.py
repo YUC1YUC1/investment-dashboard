@@ -7,7 +7,7 @@ import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="槓桿投資管理系統 V4", page_icon="📊", layout="wide")
+st.set_page_config(page_title="槓桿投資管理系統 V5", page_icon="📊", layout="wide")
 
 st.markdown("""
 <style>
@@ -20,11 +20,6 @@ st.markdown("""
 }
 [data-testid="stMetricLabel"] {font-weight:700; color:#6B7C93;}
 [data-testid="stMetricValue"] {font-size:1.65rem; color:#183153;}
-.panel {
-  background:#FFFFFF; border:1px solid #E8EDF5; border-radius:18px;
-  padding:18px 20px; box-shadow:0 8px 24px rgba(24,49,83,.06);
-  margin-bottom:1rem;
-}
 .advice {
   background:linear-gradient(135deg,#EDF4FF,#F8FBFF);
   border:1px solid #DCE8FF; border-radius:20px; padding:20px 22px;
@@ -41,40 +36,22 @@ div[data-testid="stDataFrame"] {background:#fff; border:1px solid #E8EDF5; borde
 
 DEFAULTS = {
     "loan":12540000.0,"rate":2.5,"years":30,"grace":24,
-    "income":170000.0,"fixed":100000.0,"saving":30000.0,
+    "income":170000.0,"fixed":70000.0,"saving":30000.0,
     "voo":.50,"qqq":.20,"tw":.15,"cash":.15,
     "months":6,"fee":3.0,
     "fx_green":31.5,"fx_yellow":33.0,"fx_orange":34.0,
-    "sp500_buy1":-0.10,"sp500_buy2":-0.20,
+    "bank_name":"國泰世華","bank_fx":32.33,
+    "order_mode":"定期定額"
 }
-def load_settings_from_url(defaults):
-    settings = defaults.copy()
-    numeric_keys = {
-        "loan": float, "rate": float, "years": int, "grace": int,
-        "income": float, "fixed": float, "saving": float,
-        "voo": float, "qqq": float, "tw": float, "cash": float,
-        "months": int, "fee": float,
-        "fx_green": float, "fx_yellow": float, "fx_orange": float,
-        "sp500_buy1": float, "sp500_buy2": float,
-    }
-    for key, caster in numeric_keys.items():
-        try:
-            value = st.query_params.get(key)
-            if value not in (None, ""):
-                settings[key] = caster(value)
-        except Exception:
-            pass
-    return settings
-
-def save_settings_to_url(settings):
-    for key, value in settings.items():
-        st.query_params[key] = str(value)
-
 if "settings" not in st.session_state:
-    st.session_state.settings = load_settings_from_url(DEFAULTS)
+    st.session_state.settings = DEFAULTS.copy()
 if "trades" not in st.session_state:
     st.session_state.trades = pd.DataFrame(
         columns=["日期","商品","市場","成交價","匯率","股數","手續費","備註"]
+    )
+if "fx_records" not in st.session_state:
+    st.session_state.fx_records = pd.DataFrame(
+        columns=["日期","銀行","買入匯率","換匯USD","台幣成本","備註"]
     )
 
 try:
@@ -96,7 +73,7 @@ if app_password and not st.session_state.get("auth"):
 def fetch_market():
     mapping = {
         "VOO":"VOO","QQQ":"QQQ","0050":"0050.TW",
-        "USD/TWD":"TWD=X","S&P 500":"^GSPC","DXY":"DX-Y.NYB"
+        "USD/TWD":"TWD=X","S&P 500":"^GSPC"
     }
     out={}
     for name,ticker in mapping.items():
@@ -148,11 +125,6 @@ def fx_signal(fx, s):
         return "橘燈","匯率偏高，建議本月只換原計畫的 50%–75%。","orange",0.65
     return "紅燈","匯率明顯偏高，沒有立即需求時可延後換匯。","red",0.35
 
-def market_position(item):
-    p=item["price"]; lo=item["low_1y"]; hi=item["high_1y"]
-    if None in (p,lo,hi) or hi==lo: return None
-    return (p-lo)/(hi-lo)
-
 M=fetch_market(); S=st.session_state.settings
 
 with st.sidebar:
@@ -175,6 +147,12 @@ with st.sidebar:
     if abs(total_pct-1)>1e-9: st.error("配置必須合計 100%")
     S["months"]=st.number_input("建倉月數",value=int(S["months"]),min_value=1,max_value=24)
     S["fee"]=st.number_input("美股 ETF 每筆手續費 USD",value=float(S["fee"]),min_value=0.0)
+    S["order_mode"]=st.selectbox("國泰下單方式",["定期定額","定期定股"],index=0 if S["order_mode"]=="定期定額" else 1)
+
+    st.divider(); st.subheader("實際換匯成本")
+    S["bank_name"]=st.text_input("銀行",value=S["bank_name"])
+    S["bank_fx"]=st.number_input("銀行美元買入價（銀行賣給你）",value=float(S["bank_fx"]),step=.01,format="%.4f")
+    st.caption("所有換匯成本、需要準備的台幣與建議股數，都使用這個實際買入價計算。")
 
     st.divider(); st.subheader("美元燈號門檻")
     S["fx_green"]=st.number_input("綠燈上限",value=float(S["fx_green"]),step=.1)
@@ -182,18 +160,12 @@ with st.sidebar:
     S["fx_orange"]=st.number_input("橘燈上限",value=float(S["fx_orange"]),step=.1)
     st.session_state.settings=S
 
-    st.divider()
-    st.subheader("儲存設定")
-    if st.button("💾 儲存目前設定", use_container_width=True):
-        save_settings_to_url(S)
-        st.success("已儲存在目前網址。請把這個網址加入書籤；重新整理後會保留設定。")
-    if st.button("↩️ 還原預設設定", use_container_width=True):
-        st.query_params.clear()
-        st.session_state.settings = DEFAULTS.copy()
-        st.rerun()
-    st.caption("此功能把設定寫入網址參數，不會把帳密或券商資料上傳。交易紀錄仍請使用 JSON 備份。")
-
-    backup={"settings":S,"trades":st.session_state.trades.to_dict(orient="records"),"time":datetime.now().isoformat()}
+    backup={
+        "settings":S,
+        "trades":st.session_state.trades.to_dict(orient="records"),
+        "fx_records":st.session_state.fx_records.to_dict(orient="records"),
+        "time":datetime.now().isoformat()
+    }
     st.download_button("下載完整備份",json.dumps(backup,ensure_ascii=False,indent=2),
                        f"investment_backup_{date.today()}.json","application/json",use_container_width=True)
     restore=st.file_uploader("還原備份 JSON",type=["json"])
@@ -201,48 +173,35 @@ with st.sidebar:
         data=json.load(restore)
         st.session_state.settings.update(data.get("settings",{}))
         st.session_state.trades=pd.DataFrame(data.get("trades",[]))
+        st.session_state.fx_records=pd.DataFrame(data.get("fx_records",[]))
         st.rerun()
 
 st.title("槓桿投資管理系統")
-st.caption("V4｜美元換匯儀表板、每日操作建議、建倉、交易帳本、房貸與壓力測試")
+st.caption("V5｜銀行實際買入價、換匯紀錄、定期定額／定期定股建議、建倉、房貸與風險控管")
 
 annual=S["rate"]/100
 monthly_pay=monthly_payment(S["loan"],annual,S["years"]*12,S["grace"])
 interest_only=S["loan"]*annual/12
 safe_left=S["income"]-S["fixed"]-S["saving"]-monthly_pay
-fx_now=M["USD/TWD"]["price"] or 32.16
-fx_light,fx_text,fx_class,fx_factor=fx_signal(fx_now,S)
 
-sp_pos=market_position(M["S&P 500"])
-if sp_pos is None:
-    stock_text="市場位置暫時無法判斷。"
-elif sp_pos<.35:
-    stock_text="美股位於一年區間較低位置，可按計畫或略加速投入。"
-elif sp_pos>.80:
-    stock_text="美股接近一年高檔，建議維持分批，不一次追價。"
-else:
-    stock_text="美股位於一年區間中段，照原計畫分批即可。"
-
-if safe_left<0:
-    overall="先降低槓桿，寬限期後現金流不足。"; overall_class="bad"
-elif monthly_pay/max(S["income"],1)>.40:
-    overall="投資可執行，但房貸占收入偏高，應保留較多現金。"; overall_class="orange"
-else:
-    overall="現金流尚可，依紀律分批投入。"; overall_class="green"
+market_fx=M["USD/TWD"]["price"] or 32.19
+bank_fx=S["bank_fx"]
+spread=bank_fx-market_fx
+fx_light,fx_text,fx_class,fx_factor=fx_signal(bank_fx,S)
 
 st.markdown(
-    f'<div class="advice"><div class="{overall_class}">📌 今日總結：{overall}</div>'
-    f'<div style="margin-top:8px"><b>美元：</b>{fx_light}｜{fx_text}</div>'
-    f'<div style="margin-top:5px"><b>美股：</b>{stock_text}</div></div>',
+    f'<div class="advice"><div class="{fx_class}">💵 {S["bank_name"]}換匯：{fx_light}</div>'
+    f'<div style="margin-top:8px">實際買入價 <b>{bank_fx:.4f}</b>｜市場參考價 {market_fx:.4f}｜價差 {spread:+.4f}</div>'
+    f'<div style="margin-top:5px">{fx_text}</div></div>',
     unsafe_allow_html=True
 )
 
-market_cols=st.columns(6)
-for col,key in zip(market_cols,["VOO","QQQ","0050","USD/TWD","S&P 500","DXY"]):
+market_cols=st.columns(5)
+for col,key in zip(market_cols,["VOO","QQQ","0050","USD/TWD","S&P 500"]):
     p,ch=M[key]["price"],M[key]["change"]
     col.metric(key,"暫無資料" if p is None else f"{p:,.2f}",None if ch is None else f"{ch:+.2%}")
 
-tabs=st.tabs(["首頁","美元儀表板","本月行動","交易帳本","資產配置","房貸","壓力測試","20年情境"])
+tabs=st.tabs(["首頁","換匯儀表板","本月行動","換匯紀錄","交易帳本","資產配置","房貸","壓力測試"])
 
 with tabs[0]:
     c=st.columns(4)
@@ -251,48 +210,18 @@ with tabs[0]:
     c[2].metric("房貸占收入",f"{monthly_pay/S['income']:.1%}" if S["income"] else "—")
     c[3].metric("扣支出後餘額",f"NT${safe_left:,.0f}")
 
-    L=ledger(st.session_state.trades)
-    holdings=L.groupby("商品")["股數"].sum().to_dict() if not L.empty else {}
-    cash_now=st.number_input("目前現金 TWD",value=float(S["loan"]*S["cash"]),step=10000.0)
-    values={
-        "VOO":holdings.get("VOO",0)*(M["VOO"]["price"] or 690)*fx_now,
-        "QQQ":holdings.get("QQQ",0)*(M["QQQ"]["price"] or 725)*fx_now,
-        "0050":holdings.get("0050",0)*(M["0050"]["price"] or 220),
-        "現金":cash_now
-    }
-    total_assets=sum(values.values())
-    total_cost=float(L["台幣成本"].sum()) if not L.empty else 0
-    m=st.columns(4)
-    m[0].metric("總資產",f"NT${total_assets:,.0f}")
-    m[1].metric("淨資產",f"NT${total_assets-S['loan']:,.0f}")
-    m[2].metric("投資損益",f"NT${total_assets-cash_now-total_cost:,.0f}")
-    m[3].metric("資產／貸款",f"{total_assets/S['loan']:.2f}x" if S["loan"] else "—")
-    left,right=st.columns(2)
-    with left: st.plotly_chart(px.pie(values=list(values.values()),names=list(values.keys()),hole=.5,title="目前資產配置"),use_container_width=True)
-    with right:
-        df=pd.DataFrame({"資產":list(values.keys()),"市值":list(values.values())})
-        st.plotly_chart(px.bar(df,x="資產",y="市值",title="各資產市值"),use_container_width=True)
-
 with tabs[1]:
     st.subheader("美元換匯儀表板")
     item=M["USD/TWD"]
-    pos=market_position(item)
-    c=st.columns(4)
-    c[0].metric("目前匯率",f"{fx_now:,.2f}")
-    c[1].metric("一年平均","—" if item["avg_1y"] is None else f"{item['avg_1y']:.2f}")
-    c[2].metric("一年低點","—" if item["low_1y"] is None else f"{item['low_1y']:.2f}")
-    c[3].metric("一年高點","—" if item["high_1y"] is None else f"{item['high_1y']:.2f}")
-    st.markdown(f'<div class="panel"><div class="{fx_class}" style="font-size:1.35rem">{fx_light}｜{fx_text}</div></div>',unsafe_allow_html=True)
-
-    if pos is not None:
-        st.progress(min(max(pos,0),1), text=f"目前位於一年區間的 {pos:.0%} 位置")
-    score=100
-    if fx_now>S["fx_orange"]: score=35
-    elif fx_now>S["fx_yellow"]: score=55
-    elif fx_now>S["fx_green"]: score=75
-    else: score=92
+    c=st.columns(5)
+    c[0].metric("市場參考價",f"{market_fx:.4f}")
+    c[1].metric("銀行實際買入價",f"{bank_fx:.4f}")
+    c[2].metric("銀行價差",f"{spread:+.4f}")
+    c[3].metric("一年平均","—" if item["avg_1y"] is None else f"{item['avg_1y']:.4f}")
+    c[4].metric("換匯燈號",fx_light)
+    score=92 if bank_fx<=S["fx_green"] else 75 if bank_fx<=S["fx_yellow"] else 55 if bank_fx<=S["fx_orange"] else 35
     st.metric("換匯適合度",f"{score} / 100")
-    st.caption("評分依你自訂門檻與一年區間位置產生，並非匯率預測。")
+    st.caption("燈號使用你實際會成交的銀行買入價，不再使用市場賣出／中間價計算成本。")
 
 with tabs[2]:
     if abs(total_pct-1)>1e-9:
@@ -303,49 +232,95 @@ with tabs[2]:
         risky=S["voo"]+S["qqq"]+S["tw"]
         us_twd=monthly*(S["voo"]+S["qqq"])/risky
         tw_twd=monthly*S["tw"]/risky
-        standard_usd=us_twd/fx_now
+        standard_usd=us_twd/bank_fx
         suggested_usd=standard_usd*fx_factor
+        twd_needed=suggested_usd*bank_fx
         voo_usd=suggested_usd*S["voo"]/(S["voo"]+S["qqq"])
         qqq_usd=suggested_usd-voo_usd
-        voo_qty=max(0,(voo_usd-S["fee"])/(M["VOO"]["price"] or 690))
-        qqq_qty=max(0,(qqq_usd-S["fee"])/(M["QQQ"]["price"] or 725))
-        c=st.columns(5)
+        voo_price=M["VOO"]["price"] or 690
+        qqq_price=M["QQQ"]["price"] or 725
+        voo_qty=max(0,(voo_usd-S["fee"])/voo_price)
+        qqq_qty=max(0,(qqq_usd-S["fee"])/qqq_price)
+
+        c=st.columns(6)
         c[0].metric("標準換匯",f"US${standard_usd:,.0f}")
         c[1].metric("燈號調整後",f"US${suggested_usd:,.0f}")
-        c[2].metric("VOO",f"{voo_qty:,.3f} 股")
-        c[3].metric("QQQ",f"{qqq_qty:,.3f} 股")
-        c[4].metric("0050預算",f"NT${tw_twd:,.0f}")
-        st.info(f"本月美元建議採標準計畫的 {fx_factor:.0%}。")
+        c[2].metric("需準備台幣",f"NT${twd_needed:,.0f}")
+        c[3].metric("VOO",f"{voo_qty:,.3f} 股")
+        c[4].metric("QQQ",f"{qqq_qty:,.3f} 股")
+        c[5].metric("0050預算",f"NT${tw_twd:,.0f}")
+
+        if S["order_mode"]=="定期定額":
+            st.success("目前建議使用定期定額：每月投入固定金額，較符合你的建倉與現金流規劃。")
+            st.write(f"- VOO 每月預算：約 US${voo_usd:,.0f}")
+            st.write(f"- QQQ 每月預算：約 US${qqq_usd:,.0f}")
+        else:
+            st.info("你選擇定期定股：每月股數固定，但所需台幣會隨股價與匯率變動。")
+            st.write(f"- VOO 每月：約 {voo_qty:,.3f} 股")
+            st.write(f"- QQQ 每月：約 {qqq_qty:,.3f} 股")
 
 with tabs[3]:
-    with st.form("add_trade",clear_on_submit=True):
+    st.subheader("新增換匯紀錄")
+    with st.form("fx_form",clear_on_submit=True):
         a,b,c,d=st.columns(4)
-        dt=a.date_input("日期",date.today())
+        fx_date=a.date_input("日期",date.today())
+        bank=b.text_input("銀行",value=S["bank_name"])
+        rate_input=c.number_input("買入匯率",value=float(bank_fx),step=.01,format="%.4f")
+        usd_amount=d.number_input("換匯USD",min_value=0.0,step=1000.0)
+        note=st.text_input("備註")
+        if st.form_submit_button("新增換匯紀錄",type="primary"):
+            twd_cost=rate_input*usd_amount
+            row=pd.DataFrame([{
+                "日期":str(fx_date),"銀行":bank,"買入匯率":rate_input,
+                "換匯USD":usd_amount,"台幣成本":twd_cost,"備註":note
+            }])
+            st.session_state.fx_records=pd.concat([st.session_state.fx_records,row],ignore_index=True)
+            st.rerun()
+
+    st.session_state.fx_records=st.data_editor(
+        st.session_state.fx_records,num_rows="dynamic",use_container_width=True
+    )
+    if not st.session_state.fx_records.empty:
+        x=st.session_state.fx_records.copy()
+        for col in ["買入匯率","換匯USD","台幣成本"]:
+            x[col]=pd.to_numeric(x[col],errors="coerce").fillna(0)
+        total_usd=x["換匯USD"].sum()
+        total_twd=x["台幣成本"].sum()
+        avg_fx=total_twd/total_usd if total_usd else 0
+        c=st.columns(3)
+        c[0].metric("累積換匯USD",f"US${total_usd:,.0f}")
+        c[1].metric("累積台幣成本",f"NT${total_twd:,.0f}")
+        c[2].metric("平均換匯成本",f"{avg_fx:.4f}")
+        st.download_button("下載換匯CSV",x.to_csv(index=False).encode("utf-8-sig"),"換匯紀錄.csv","text/csv")
+
+with tabs[4]:
+    with st.form("trade_form",clear_on_submit=True):
+        a,b,c,d=st.columns(4)
+        trade_date=a.date_input("日期",date.today(),key="trade_date")
         product=b.selectbox("商品",["VOO","QQQ","0050"])
         market_name=c.selectbox("市場",["美股","台股"])
         price=d.number_input("成交價",min_value=0.0)
         e,f,g=st.columns(3)
-        fx_input=e.number_input("匯率",value=float(fx_now))
+        fx_input=e.number_input("匯率",value=float(bank_fx))
         qty=f.number_input("股數",min_value=0.0,step=.001)
         fee=g.number_input("手續費",min_value=0.0,value=float(S["fee"]))
-        note=st.text_input("備註")
+        note=st.text_input("備註",key="trade_note")
         if st.form_submit_button("新增交易",type="primary"):
-            row=pd.DataFrame([{"日期":str(dt),"商品":product,"市場":market_name,"成交價":price,
-                               "匯率":fx_input,"股數":qty,"手續費":fee,"備註":note}])
+            row=pd.DataFrame([{"日期":str(trade_date),"商品":product,"市場":market_name,
+                               "成交價":price,"匯率":fx_input,"股數":qty,"手續費":fee,"備註":note}])
             st.session_state.trades=pd.concat([st.session_state.trades,row],ignore_index=True)
             st.rerun()
     st.session_state.trades=st.data_editor(st.session_state.trades,num_rows="dynamic",use_container_width=True)
     L=ledger(st.session_state.trades)
     if not L.empty:
         st.dataframe(L,use_container_width=True,hide_index=True)
-        st.download_button("下載交易 CSV",L.to_csv(index=False).encode("utf-8-sig"),"交易紀錄.csv","text/csv")
 
-with tabs[4]:
+with tabs[5]:
     L=ledger(st.session_state.trades)
     holdings=L.groupby("商品")["股數"].sum().to_dict() if not L.empty else {}
     values={
-        "VOO":holdings.get("VOO",0)*(M["VOO"]["price"] or 690)*fx_now,
-        "QQQ":holdings.get("QQQ",0)*(M["QQQ"]["price"] or 725)*fx_now,
+        "VOO":holdings.get("VOO",0)*(M["VOO"]["price"] or 690)*bank_fx,
+        "QQQ":holdings.get("QQQ",0)*(M["QQQ"]["price"] or 725)*bank_fx,
         "0050":holdings.get("0050",0)*(M["0050"]["price"] or 220),
         "現金":S["loan"]*S["cash"]
     }
@@ -358,13 +333,15 @@ with tabs[4]:
         rows.append([k,v,current,targets[k],diff,action])
     st.dataframe(pd.DataFrame(rows,columns=["資產","市值","目前比例","目標比例","偏離","建議"]),use_container_width=True,hide_index=True)
 
-with tabs[5]:
+with tabs[6]:
     A=amortization(S["loan"],annual,S["years"]*12,S["grace"])
-    yearly=A.assign(年度=((A["月份"]-1)//12)+1).groupby("年度",as_index=False).agg({"利息":"sum","本金":"sum","月付金":"sum","期末本金":"last"})
+    yearly=A.assign(年度=((A["月份"]-1)//12)+1).groupby("年度",as_index=False).agg(
+        {"利息":"sum","本金":"sum","月付金":"sum","期末本金":"last"}
+    )
     st.plotly_chart(px.line(yearly,x="年度",y="期末本金",title="房貸餘額"),use_container_width=True)
     st.dataframe(yearly,use_container_width=True,hide_index=True)
 
-with tabs[6]:
+with tabs[7]:
     investable=S["loan"]*(1-S["cash"]); rows=[]
     for drop in [0,-.1,-.2,-.3,-.4,-.5]:
         assets=investable*(1+drop)+S["loan"]*S["cash"]
@@ -373,14 +350,4 @@ with tabs[6]:
     st.dataframe(df,use_container_width=True,hide_index=True)
     st.plotly_chart(px.bar(df,x="市場跌幅",y="淨資產",title="市場下跌壓力"),use_container_width=True)
 
-with tabs[7]:
-    A=amortization(S["loan"],annual,S["years"]*12,S["grace"]); rows=[]
-    for year in range(21):
-        bal=S["loan"] if year==0 else float(A.iloc[min(year*12-1,len(A)-1)]["期末本金"])
-        for ret,label in [(.05,"保守5%"),(.07,"基準7%"),(.09,"樂觀9%")]:
-            assets=S["loan"]*(1-S["cash"])*(1+ret)**year+S["loan"]*S["cash"]*(1.015)**year
-            rows.append([year,label,assets-bal])
-    st.plotly_chart(px.line(pd.DataFrame(rows,columns=["年度","情境","淨資產"]),
-                            x="年度",y="淨資產",color="情境",title="20 年淨資產情境"),use_container_width=True)
-
-st.caption("設定可透過「儲存目前設定」保留在網址；交易紀錄請定期下載 JSON 備份。美元燈號不是匯率預測。市場資料可能延遲。")
+st.caption("銀行買入價需由你依國泰數位通路當下報價更新。市場參考價與銀行實際成交價可能不同。")
