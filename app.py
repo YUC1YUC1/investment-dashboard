@@ -47,8 +47,31 @@ DEFAULTS = {
     "fx_green":31.5,"fx_yellow":33.0,"fx_orange":34.0,
     "sp500_buy1":-0.10,"sp500_buy2":-0.20,
 }
+def load_settings_from_url(defaults):
+    settings = defaults.copy()
+    numeric_keys = {
+        "loan": float, "rate": float, "years": int, "grace": int,
+        "income": float, "fixed": float, "saving": float,
+        "voo": float, "qqq": float, "tw": float, "cash": float,
+        "months": int, "fee": float,
+        "fx_green": float, "fx_yellow": float, "fx_orange": float,
+        "sp500_buy1": float, "sp500_buy2": float,
+    }
+    for key, caster in numeric_keys.items():
+        try:
+            value = st.query_params.get(key)
+            if value not in (None, ""):
+                settings[key] = caster(value)
+        except Exception:
+            pass
+    return settings
+
+def save_settings_to_url(settings):
+    for key, value in settings.items():
+        st.query_params[key] = str(value)
+
 if "settings" not in st.session_state:
-    st.session_state.settings = DEFAULTS.copy()
+    st.session_state.settings = load_settings_from_url(DEFAULTS)
 if "trades" not in st.session_state:
     st.session_state.trades = pd.DataFrame(
         columns=["日期","商品","市場","成交價","匯率","股數","手續費","備註"]
@@ -158,6 +181,17 @@ with st.sidebar:
     S["fx_yellow"]=st.number_input("黃燈上限",value=float(S["fx_yellow"]),step=.1)
     S["fx_orange"]=st.number_input("橘燈上限",value=float(S["fx_orange"]),step=.1)
     st.session_state.settings=S
+
+    st.divider()
+    st.subheader("儲存設定")
+    if st.button("💾 儲存目前設定", use_container_width=True):
+        save_settings_to_url(S)
+        st.success("已儲存在目前網址。請把這個網址加入書籤；重新整理後會保留設定。")
+    if st.button("↩️ 還原預設設定", use_container_width=True):
+        st.query_params.clear()
+        st.session_state.settings = DEFAULTS.copy()
+        st.rerun()
+    st.caption("此功能把設定寫入網址參數，不會把帳密或券商資料上傳。交易紀錄仍請使用 JSON 備份。")
 
     backup={"settings":S,"trades":st.session_state.trades.to_dict(orient="records"),"time":datetime.now().isoformat()}
     st.download_button("下載完整備份",json.dumps(backup,ensure_ascii=False,indent=2),
@@ -349,4 +383,4 @@ with tabs[7]:
     st.plotly_chart(px.line(pd.DataFrame(rows,columns=["年度","情境","淨資產"]),
                             x="年度",y="淨資產",color="情境",title="20 年淨資產情境"),use_container_width=True)
 
-st.caption("美元燈號與分數是規則式工具，不是匯率預測。市場資料來自 Yahoo Finance / yfinance，可能延遲。")
+st.caption("設定可透過「儲存目前設定」保留在網址；交易紀錄請定期下載 JSON 備份。美元燈號不是匯率預測。市場資料可能延遲。")
