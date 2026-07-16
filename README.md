@@ -1,27 +1,12 @@
+# 槓桿投資管理系統 V2 專業版
 
-# 1254萬槓桿投資管理系統（網頁版）
+將 app.py、requirements.txt、.streamlit/config.toml 覆蓋到原 GitHub repository，
+在 GitHub Desktop Commit 後 Push，Streamlit Cloud 會自動更新。
 
-## 本機執行
-1. 安裝 Python 3.11 或以上版本。
-2. 開啟命令提示字元，進入此資料夾。
-3. 執行：
-   pip install -r requirements.txt
-   streamlit run app.py
-4. 瀏覽器會自動開啟。
+## 密碼保護
+Streamlit Cloud → App settings → Secrets，加入：
+APP_PASSWORD = "你的密碼"
 
-## 免費部署到 Streamlit Community Cloud
-1. 建立 GitHub 帳號與一個新的 repository。
-2. 上傳 `app.py`、`requirements.txt`。
-3. 在 Streamlit Community Cloud 選擇該 repository，入口檔設為 `app.py`。
-4. 部署完成後會得到一個可用手機與電腦開啟的網址。
-
-## 功能
-- 自動抓取 VOO、QQQ、0050 與 USD/TWD
-- 6 個月建倉指揮中心
-- 房貸 30 年試算
-- 資產配置與再平衡
-- -10% 至 -50% 壓力測試
-- 20 年淨資產情境
-
-## 注意
-市場資料可能延遲或暫時無法取得。此工具是個人財務規劃試算，不構成投資建議。
+## 資料保存
+免費 Streamlit Cloud 不保證本機檔案永久保存。本版可下載完整 JSON 備份，
+下次使用時再上傳還原。

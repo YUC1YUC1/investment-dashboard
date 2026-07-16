@@ -1,249 +1,283 @@
-
-import math
-from datetime import datetime
-
+import json
+from datetime import date, datetime
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(
-    page_title="1254萬槓桿投資管理系統",
-    page_icon="📊",
-    layout="wide",
-)
+st.set_page_config(page_title="槓桿投資 V2", page_icon="📊", layout="wide")
 
-st.markdown("""
-<style>
-.block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
-[data-testid="stMetricValue"] {font-size: 1.65rem;}
-.small-note {color:#666; font-size:.88rem;}
-</style>
-""", unsafe_allow_html=True)
+DEFAULTS = {
+    "loan": 12540000.0, "rate": 2.5, "years": 30, "grace": 24,
+    "income": 170000.0, "fixed": 100000.0, "saving": 30000.0,
+    "voo": .50, "qqq": .20, "tw": .15, "cash": .15,
+    "months": 6, "fee": 3.0, "fx_alert": 34.0,
+}
+if "settings" not in st.session_state:
+    st.session_state.settings = DEFAULTS.copy()
+if "trades" not in st.session_state:
+    st.session_state.trades = pd.DataFrame(
+        columns=["日期","商品","市場","成交價","匯率","股數","手續費","備註"]
+    )
+
+try:
+    password = st.secrets.get("APP_PASSWORD", "")
+except Exception:
+    password = ""
+if password and not st.session_state.get("auth"):
+    st.title("🔒 私人投資儀表板")
+    pwd = st.text_input("密碼", type="password")
+    if st.button("登入", type="primary"):
+        if pwd == password:
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("密碼錯誤")
+    st.stop()
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_market_data():
-    tickers = {
-        "VOO": "VOO",
-        "QQQ": "QQQ",
-        "0050": "0050.TW",
-        "USD/TWD": "TWD=X",
-        "S&P 500": "^GSPC",
-    }
-    out = {}
-    for name, ticker in tickers.items():
+def prices():
+    mapping = {"VOO":"VOO","QQQ":"QQQ","0050":"0050.TW","USD/TWD":"TWD=X"}
+    result = {}
+    for name, ticker in mapping.items():
         try:
-            data = yf.Ticker(ticker).history(period="5d", auto_adjust=False)
-            if data.empty:
-                out[name] = None
-                continue
-            close = float(data["Close"].dropna().iloc[-1])
-            prev = float(data["Close"].dropna().iloc[-2]) if len(data["Close"].dropna()) >= 2 else close
-            out[name] = {
-                "price": close,
-                "change_pct": (close / prev - 1) if prev else 0,
-                "updated": data.index[-1].strftime("%Y-%m-%d"),
-            }
+            hist = yf.Ticker(ticker).history(period="5d", auto_adjust=False)["Close"].dropna()
+            p = float(hist.iloc[-1])
+            prev = float(hist.iloc[-2]) if len(hist)>1 else p
+            result[name] = (p, p/prev-1)
         except Exception:
-            out[name] = None
-    return out
+            result[name] = (None, None)
+    return result
 
-def monthly_payment(principal, annual_rate, total_months, grace_months):
-    monthly_rate = annual_rate / 12
-    amort_months = total_months - grace_months
-    if monthly_rate == 0:
-        return principal / amort_months
-    return principal * monthly_rate * (1 + monthly_rate) ** amort_months / ((1 + monthly_rate) ** amort_months - 1)
+def pmt(principal, annual, months, grace):
+    r = annual/12
+    n = max(1, months-grace)
+    if r == 0:
+        return principal/n
+    return principal*r*(1+r)**n/((1+r)**n-1)
 
-def build_amortization(principal, annual_rate, total_months, grace_months):
-    r = annual_rate / 12
-    payment_after_grace = monthly_payment(principal, annual_rate, total_months, grace_months)
+def amort(principal, annual, months, grace):
+    monthly = annual/12
+    pay = pmt(principal, annual, months, grace)
     bal = principal
     rows = []
-    for m in range(1, total_months + 1):
-        interest = bal * r
-        if m <= grace_months:
-            payment = interest
-            principal_paid = 0
-        else:
-            payment = min(payment_after_grace, bal + interest)
-            principal_paid = max(0, payment - interest)
-        end_bal = max(0, bal - principal_paid)
-        rows.append([m, bal, interest, principal_paid, payment, end_bal])
-        bal = end_bal
-    return pd.DataFrame(rows, columns=["月份","期初本金","利息","本金","月付金","期末本金"])
+    for m in range(1, months+1):
+        interest = bal*monthly
+        payment = interest if m<=grace else min(pay, bal+interest)
+        principal_paid = 0 if m<=grace else max(0, payment-interest)
+        bal = max(0, bal-principal_paid)
+        rows.append([m, interest, principal_paid, payment, bal])
+    return pd.DataFrame(rows, columns=["月份","利息","本金","月付金","期末本金"])
 
-def money(x):
-    return f"NT${x:,.0f}"
+def ledger(df):
+    if df.empty:
+        return df.copy()
+    x = df.copy()
+    for c in ["成交價","匯率","股數","手續費"]:
+        x[c] = pd.to_numeric(x[c], errors="coerce").fillna(0)
+    x["原幣金額"] = x["成交價"]*x["股數"]+x["手續費"]
+    x["台幣成本"] = x.apply(
+        lambda r: r["原幣金額"]*r["匯率"] if r["市場"]=="美股" else r["原幣金額"], axis=1
+    )
+    return x
 
-st.title("📊 1254 萬槓桿投資管理系統")
-st.caption("即時市場資料 + 建倉規劃 + 房貸現金流 + 壓力測試。市場資料每 15 分鐘快取一次。")
-
-market = fetch_market_data()
+S = st.session_state.settings
+P = prices()
 
 with st.sidebar:
-    st.header("核心設定")
-    loan = st.number_input("貸款本金（TWD）", min_value=0, value=12_540_000, step=100_000)
-    rate = st.number_input("年利率", min_value=0.0, value=2.5, step=0.05) / 100
-    term_years = st.number_input("貸款年限", min_value=1, value=30, step=1)
-    grace_months = st.number_input("寬限期（月）", min_value=0, value=24, step=1)
-    family_income = st.number_input("家庭月收入（TWD）", min_value=0, value=170_000, step=5_000)
-    fixed_costs = st.number_input("每月生活＋固定支出", min_value=0, value=100_000, step=5_000)
-
+    st.header("⚙️ 核心設定")
+    S["loan"] = st.number_input("貸款本金", value=float(S["loan"]), step=100000.0)
+    S["rate"] = st.number_input("年利率（%）", value=float(S["rate"]), step=.05)
+    S["years"] = st.number_input("貸款年限", value=int(S["years"]), min_value=1)
+    S["grace"] = st.number_input("寬限期（月）", value=int(S["grace"]), min_value=0)
+    S["income"] = st.number_input("家庭月收入", value=float(S["income"]), step=5000.0)
+    S["fixed"] = st.number_input("生活＋固定支出", value=float(S["fixed"]), step=5000.0)
+    S["saving"] = st.number_input("安全儲蓄目標", value=float(S["saving"]), step=5000.0)
     st.divider()
-    st.header("目標配置")
-    voo_pct = st.slider("VOO", 0, 100, 50) / 100
-    qqq_pct = st.slider("QQQ", 0, 100, 20) / 100
-    tw_pct = st.slider("0050", 0, 100, 15) / 100
-    cash_pct = st.slider("現金", 0, 100, 15) / 100
-    total_pct = voo_pct + qqq_pct + tw_pct + cash_pct
-    if abs(total_pct - 1) > 1e-6:
-        st.error(f"配置合計目前為 {total_pct:.0%}，請調整為 100%。")
+    st.header("🎯 目標配置")
+    S["voo"] = st.slider("VOO",0,100,int(S["voo"]*100))/100
+    S["qqq"] = st.slider("QQQ",0,100,int(S["qqq"]*100))/100
+    S["tw"] = st.slider("0050",0,100,int(S["tw"]*100))/100
+    S["cash"] = st.slider("現金",0,100,int(S["cash"]*100))/100
+    total = S["voo"]+S["qqq"]+S["tw"]+S["cash"]
+    st.write(f"合計：**{total:.0%}**")
+    if abs(total-1) > 1e-9:
+        st.error("配置必須合計 100%")
+    S["months"] = st.number_input("建倉月數", value=int(S["months"]), min_value=1, max_value=24)
+    S["fee"] = st.number_input("美股ETF每筆手續費USD", value=float(S["fee"]), min_value=0.0)
+    S["fx_alert"] = st.number_input("匯率警戒上限", value=float(S["fx_alert"]), min_value=0.0)
+    st.session_state.settings = S
 
-    build_months = st.number_input("建倉月數", min_value=1, max_value=24, value=6, step=1)
-    us_fee = st.number_input("美股 ETF 每筆手續費（USD）", min_value=0.0, value=3.0, step=0.5)
+    backup = {
+        "settings": S,
+        "trades": st.session_state.trades.to_dict(orient="records"),
+        "time": datetime.now().isoformat(),
+    }
+    st.download_button(
+        "💾 下載完整備份",
+        json.dumps(backup, ensure_ascii=False, indent=2),
+        f"investment_backup_{date.today()}.json",
+        "application/json",
+        use_container_width=True,
+    )
+    restore = st.file_uploader("還原備份 JSON", type=["json"])
+    if restore and st.button("執行還原", use_container_width=True):
+        data = json.load(restore)
+        st.session_state.settings.update(data.get("settings", {}))
+        st.session_state.trades = pd.DataFrame(data.get("trades", []))
+        st.rerun()
 
-# Market cards
-st.subheader("即時市場")
+st.title("📊 槓桿投資管理系統 V2 專業版")
+st.caption("即時市場、交易帳本、建倉規劃、再平衡、房貸與壓力測試。")
+
 cols = st.columns(4)
 for col, key in zip(cols, ["VOO","QQQ","0050","USD/TWD"]):
-    item = market.get(key)
-    if item:
-        prefix = "US$" if key in ("VOO","QQQ") else ""
-        suffix = "" if key != "USD/TWD" else " TWD"
-        col.metric(key, f"{prefix}{item['price']:,.2f}{suffix}", f"{item['change_pct']:+.2%}")
-    else:
-        col.metric(key, "資料暫時無法取得")
+    price, change = P[key]
+    col.metric(key, "暫無資料" if price is None else f"{price:,.2f}",
+               None if change is None else f"{change:+.2%}")
 
-total_months = int(term_years * 12)
-grace_interest = loan * rate / 12
-post_grace_payment = monthly_payment(loan, rate, total_months, int(grace_months))
-safe_balance = family_income - fixed_costs - post_grace_payment
+annual = S["rate"]/100
+monthly_pay = pmt(S["loan"], annual, S["years"]*12, S["grace"])
+interest_only = S["loan"]*annual/12
+safe_left = S["income"]-S["fixed"]-S["saving"]-monthly_pay
 
-st.subheader("核心風險指標")
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("寬限期每月利息", money(grace_interest))
-m2.metric("寬限期後月付金", money(post_grace_payment))
-m3.metric("房貸占家庭收入", f"{post_grace_payment/family_income:.1%}" if family_income else "—")
-m4.metric("寬限期後每月餘額", money(safe_balance))
+m = st.columns(4)
+m[0].metric("寬限期月息", f"NT${interest_only:,.0f}")
+m[1].metric("寬限期後月付", f"NT${monthly_pay:,.0f}")
+m[2].metric("房貸占收入", f"{monthly_pay/S['income']:.1%}" if S["income"] else "—")
+m[3].metric("扣支出後餘額", f"NT${safe_left:,.0f}")
 
-if safe_balance < 0:
-    st.error("寬限期結束後，每月現金流為負，這個槓桿規模不建議直接執行。")
-elif post_grace_payment / family_income > 0.4:
-    st.warning("寬限期後房貸占家庭收入超過 40%，建議降低貸款本金或提高現金部位。")
-else:
-    st.success("以目前輸入條件，現金流尚可執行，但仍需承受市場大跌與收入變動風險。")
-
-tabs = st.tabs(["建倉指揮中心","資產配置","房貸現金流","壓力測試","20年情境"])
+tabs = st.tabs(["總覽","交易帳本","建倉","再平衡","房貸","壓力測試","20年情境"])
 
 with tabs[0]:
-    st.subheader("每月建倉建議")
-    if abs(total_pct - 1) < 1e-6:
-        investable = loan * (1 - cash_pct)
-        monthly_total = investable / build_months
-        risky_total_pct = voo_pct + qqq_pct + tw_pct
-        us_share = (voo_pct + qqq_pct) / risky_total_pct if risky_total_pct else 0
-        tw_share = tw_pct / risky_total_pct if risky_total_pct else 0
-        monthly_us_twd = monthly_total * us_share
-        monthly_0050_twd = monthly_total * tw_share
-
-        fx = market["USD/TWD"]["price"] if market.get("USD/TWD") else 32.16
-        voo_price = market["VOO"]["price"] if market.get("VOO") else 690
-        qqq_price = market["QQQ"]["price"] if market.get("QQQ") else 725
-
-        monthly_usd = monthly_us_twd / fx
-        voo_budget = monthly_usd * voo_pct / (voo_pct + qqq_pct)
-        qqq_budget = monthly_usd - voo_budget
-        voo_shares = max(0, (voo_budget - us_fee) / voo_price)
-        qqq_shares = max(0, (qqq_budget - us_fee) / qqq_price)
-
-        a,b,c,d = st.columns(4)
-        a.metric("本月換匯", f"US${monthly_usd:,.0f}")
-        b.metric("VOO", f"{voo_shares:,.3f} 股")
-        c.metric("QQQ", f"{qqq_shares:,.3f} 股")
-        d.metric("0050 預算", money(monthly_0050_twd))
-
-        plan = pd.DataFrame({
-            "月份":[f"第{i}月" for i in range(1,int(build_months)+1)],
-            "換匯USD":[monthly_usd]*int(build_months),
-            "VOO股數":[voo_shares]*int(build_months),
-            "QQQ股數":[qqq_shares]*int(build_months),
-            "0050預算TWD":[monthly_0050_twd]*int(build_months),
-            "累積完成率":[i/int(build_months) for i in range(1,int(build_months)+1)]
-        })
-        st.dataframe(plan.style.format({
-            "換匯USD":"{:,.0f}","VOO股數":"{:,.3f}","QQQ股數":"{:,.3f}",
-            "0050預算TWD":"{:,.0f}","累積完成率":"{:.0%}"
-        }), use_container_width=True, hide_index=True)
-
-with tabs[1]:
-    st.subheader("目前持有部位")
-    c1,c2,c3,c4 = st.columns(4)
-    voo_qty = c1.number_input("VOO 股數", min_value=0.0, value=0.0, step=1.0)
-    qqq_qty = c2.number_input("QQQ 股數", min_value=0.0, value=0.0, step=1.0)
-    tw_qty = c3.number_input("0050 股數", min_value=0.0, value=0.0, step=100.0)
-    cash_now = c4.number_input("現金 TWD", min_value=0.0, value=float(loan*cash_pct), step=10000.0)
-
-    fx = market["USD/TWD"]["price"] if market.get("USD/TWD") else 32.16
-    voo_price = market["VOO"]["price"] if market.get("VOO") else 690
-    qqq_price = market["QQQ"]["price"] if market.get("QQQ") else 725
-    tw_price = market["0050"]["price"] if market.get("0050") else 220
-
+    L = ledger(st.session_state.trades)
+    holdings = L.groupby("商品")["股數"].sum().to_dict() if not L.empty else {}
+    fx = P["USD/TWD"][0] or 32.16
+    voo_p, qqq_p, tw_p = P["VOO"][0] or 690, P["QQQ"][0] or 725, P["0050"][0] or 220
+    cash_now = st.number_input("目前現金 TWD", value=float(S["loan"]*S["cash"]), step=10000.0)
     values = {
-        "VOO": voo_qty*voo_price*fx,
-        "QQQ": qqq_qty*qqq_price*fx,
-        "0050": tw_qty*tw_price,
+        "VOO": holdings.get("VOO",0)*voo_p*fx,
+        "QQQ": holdings.get("QQQ",0)*qqq_p*fx,
+        "0050": holdings.get("0050",0)*tw_p,
         "現金": cash_now,
     }
-    total_value = sum(values.values())
-    alloc = pd.DataFrame({
-        "資產": list(values.keys()),
-        "目前市值": list(values.values()),
-        "目前比例": [v/total_value if total_value else 0 for v in values.values()],
-        "目標比例": [voo_pct, qqq_pct, tw_pct, cash_pct]
-    })
-    alloc["偏離"] = alloc["目前比例"] - alloc["目標比例"]
-    alloc["建議"] = alloc["偏離"].apply(lambda x: "維持" if abs(x)<=0.02 else ("暫停買進" if x>0 else "優先買進"))
-    st.dataframe(alloc.style.format({"目前市值":"{:,.0f}","目前比例":"{:.1%}","目標比例":"{:.1%}","偏離":"{:+.1%}"}), use_container_width=True, hide_index=True)
-    fig = px.pie(alloc, values="目前市值", names="資產", title="目前資產配置")
-    st.plotly_chart(fig, use_container_width=True)
+    total_assets = sum(values.values())
+    cost = float(L["台幣成本"].sum()) if not L.empty else 0
+    c = st.columns(4)
+    c[0].metric("總資產", f"NT${total_assets:,.0f}")
+    c[1].metric("淨資產", f"NT${total_assets-S['loan']:,.0f}")
+    c[2].metric("投資損益", f"NT${total_assets-cash_now-cost:,.0f}")
+    c[3].metric("資產/貸款", f"{total_assets/S['loan']:.2f}x" if S["loan"] else "—")
+    st.plotly_chart(px.pie(values=list(values.values()), names=list(values.keys()),
+                           hole=.45, title="目前資產配置"), use_container_width=True)
+
+with tabs[1]:
+    with st.form("trade", clear_on_submit=True):
+        a,b,c,d = st.columns(4)
+        dt = a.date_input("日期", date.today())
+        product = b.selectbox("商品", ["VOO","QQQ","0050"])
+        market_name = c.selectbox("市場", ["美股","台股"])
+        price = d.number_input("成交價", min_value=0.0)
+        e,f,g = st.columns(3)
+        fx_in = e.number_input("匯率", value=float(P["USD/TWD"][0] or 32.16))
+        qty = f.number_input("股數", min_value=0.0, step=.001)
+        fee = g.number_input("手續費", min_value=0.0, value=float(S["fee"]))
+        note = st.text_input("備註")
+        if st.form_submit_button("新增交易", type="primary"):
+            row = pd.DataFrame([{
+                "日期":str(dt),"商品":product,"市場":market_name,"成交價":price,
+                "匯率":fx_in,"股數":qty,"手續費":fee,"備註":note
+            }])
+            st.session_state.trades = pd.concat([st.session_state.trades,row], ignore_index=True)
+            st.rerun()
+    st.session_state.trades = st.data_editor(
+        st.session_state.trades, num_rows="dynamic", use_container_width=True
+    )
+    L = ledger(st.session_state.trades)
+    if not L.empty:
+        st.dataframe(L, use_container_width=True, hide_index=True)
+        st.download_button("下載交易CSV", L.to_csv(index=False).encode("utf-8-sig"),
+                           "交易紀錄.csv", "text/csv")
 
 with tabs[2]:
-    amort = build_amortization(loan, rate, total_months, int(grace_months))
-    st.dataframe(amort.head(36).style.format({
-        "期初本金":"{:,.0f}","利息":"{:,.0f}","本金":"{:,.0f}","月付金":"{:,.0f}","期末本金":"{:,.0f}"
-    }), use_container_width=True, hide_index=True)
-    yearly = amort.copy()
-    yearly["年度"] = ((yearly["月份"]-1)//12)+1
-    yearly = yearly.groupby("年度", as_index=False).agg({"利息":"sum","本金":"sum","月付金":"sum","期末本金":"last"})
-    fig = px.line(yearly, x="年度", y="期末本金", title="貸款餘額")
-    st.plotly_chart(fig, use_container_width=True)
+    if abs(total-1) > 1e-9:
+        st.error("先把配置調成 100%")
+    else:
+        fx = P["USD/TWD"][0] or 32.16
+        voo_p, qqq_p = P["VOO"][0] or 690, P["QQQ"][0] or 725
+        investable = S["loan"]*(1-S["cash"])
+        monthly = investable/S["months"]
+        risk_total = S["voo"]+S["qqq"]+S["tw"]
+        us_twd = monthly*(S["voo"]+S["qqq"])/risk_total
+        tw_twd = monthly*S["tw"]/risk_total
+        usd = us_twd/fx
+        voo_usd = usd*S["voo"]/(S["voo"]+S["qqq"])
+        qqq_usd = usd-voo_usd
+        voo_qty = max(0,(voo_usd-S["fee"])/voo_p)
+        qqq_qty = max(0,(qqq_usd-S["fee"])/qqq_p)
+        c = st.columns(4)
+        c[0].metric("本月換匯", f"US${usd:,.0f}")
+        c[1].metric("VOO", f"{voo_qty:,.3f} 股")
+        c[2].metric("QQQ", f"{qqq_qty:,.3f} 股")
+        c[3].metric("0050預算", f"NT${tw_twd:,.0f}")
+        plan = pd.DataFrame({
+            "月份":[f"第{i}月" for i in range(1,S["months"]+1)],
+            "換匯USD":[usd]*S["months"], "VOO股數":[voo_qty]*S["months"],
+            "QQQ股數":[qqq_qty]*S["months"], "0050預算":[tw_twd]*S["months"],
+        })
+        st.dataframe(plan, use_container_width=True, hide_index=True)
 
 with tabs[3]:
-    investable = loan*(1-cash_pct)
-    stress = []
-    for drop in [0,-0.1,-0.2,-0.3,-0.4,-0.5]:
-        assets = investable*(1+drop) + loan*cash_pct
-        net = assets-loan
-        stress.append([f"{drop:.0%}",assets,net,assets/loan if loan else 0])
-    stress_df = pd.DataFrame(stress,columns=["市場跌幅","總資產","淨資產","資產/貸款"])
-    st.dataframe(stress_df.style.format({"總資產":"{:,.0f}","淨資產":"{:,.0f}","資產/貸款":"{:.2f}x"}),use_container_width=True,hide_index=True)
-    fig = px.bar(stress_df, x="市場跌幅", y="淨資產", title="不同跌幅下淨資產")
-    st.plotly_chart(fig,use_container_width=True)
+    L = ledger(st.session_state.trades)
+    holdings = L.groupby("商品")["股數"].sum().to_dict() if not L.empty else {}
+    fx = P["USD/TWD"][0] or 32.16
+    values = {
+        "VOO": holdings.get("VOO",0)*(P["VOO"][0] or 690)*fx,
+        "QQQ": holdings.get("QQQ",0)*(P["QQQ"][0] or 725)*fx,
+        "0050": holdings.get("0050",0)*(P["0050"][0] or 220),
+        "現金": S["loan"]*S["cash"],
+    }
+    target = {"VOO":S["voo"],"QQQ":S["qqq"],"0050":S["tw"],"現金":S["cash"]}
+    total_value = sum(values.values())
+    rows=[]
+    for k,v in values.items():
+        cur = v/total_value if total_value else 0
+        diff = cur-target[k]
+        action = "維持" if abs(diff)<=.02 else ("暫停買進" if diff>0 else "優先買進")
+        rows.append([k,v,cur,target[k],diff,action])
+    df = pd.DataFrame(rows, columns=["資產","市值","目前比例","目標比例","偏離","建議"])
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 with tabs[4]:
-    years = list(range(0,21))
-    amort = build_amortization(loan, rate, total_months, int(grace_months))
-    balances = [loan] + [float(amort.iloc[min(y*12-1,len(amort)-1)]["期末本金"]) for y in years[1:]]
-    rows=[]
-    for y,bal in zip(years,balances):
-        for ret,label in [(0.05,"保守5%"),(0.07,"基準7%"),(0.09,"樂觀9%")]:
-            asset = loan*(1-cash_pct)*(1+ret)**y + loan*cash_pct*(1.015)**y
-            rows.append([y,label,asset-bal])
-    proj=pd.DataFrame(rows,columns=["年度","情境","淨資產"])
-    fig=px.line(proj,x="年度",y="淨資產",color="情境",title="20年淨資產推估")
-    st.plotly_chart(fig,use_container_width=True)
-    st.caption("報酬率僅為假設，未扣除稅負、匯差、交易成本與實際市場路徑差異。")
+    A = amort(S["loan"], annual, S["years"]*12, S["grace"])
+    yearly = A.assign(年度=((A["月份"]-1)//12)+1).groupby("年度",as_index=False).agg(
+        {"利息":"sum","本金":"sum","月付金":"sum","期末本金":"last"}
+    )
+    st.plotly_chart(px.line(yearly,x="年度",y="期末本金",title="房貸餘額"),
+                    use_container_width=True)
+    st.dataframe(yearly, use_container_width=True, hide_index=True)
 
-st.divider()
-st.markdown('<div class="small-note">資料來源：Yahoo Finance（透過 yfinance）。即時性可能延遲，且資料供應中斷時會使用備援價格。此工具僅供個人規劃，不構成投資建議。</div>', unsafe_allow_html=True)
+with tabs[5]:
+    investable = S["loan"]*(1-S["cash"])
+    rows=[]
+    for drop in [0,-.1,-.2,-.3,-.4,-.5]:
+        assets = investable*(1+drop)+S["loan"]*S["cash"]
+        rows.append([drop,assets,assets-S["loan"],assets/S["loan"]])
+    df = pd.DataFrame(rows, columns=["跌幅","總資產","淨資產","資產/貸款"])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.plotly_chart(px.bar(df,x="跌幅",y="淨資產",title="市場下跌壓力"),
+                    use_container_width=True)
+
+with tabs[6]:
+    A = amort(S["loan"], annual, S["years"]*12, S["grace"])
+    rows=[]
+    for year in range(21):
+        bal = S["loan"] if year==0 else float(A.iloc[min(year*12-1,len(A)-1)]["期末本金"])
+        for ret,label in [(.05,"保守5%"),(.07,"基準7%"),(.09,"樂觀9%")]:
+            assets = S["loan"]*(1-S["cash"])*(1+ret)**year + S["loan"]*S["cash"]*(1.015)**year
+            rows.append([year,label,assets-bal])
+    df = pd.DataFrame(rows,columns=["年度","情境","淨資產"])
+    st.plotly_chart(px.line(df,x="年度",y="淨資產",color="情境",
+                            title="20年淨資產情境"), use_container_width=True)
+
+st.caption("市場資料來自 Yahoo Finance / yfinance，可能延遲。免費 Streamlit Cloud 不保證本機檔案永久保存，請定期下載 JSON 備份。")
