@@ -1,15 +1,20 @@
-# YW Wealth OS v1.0 UI Edition
+# YW Wealth OS v1.1 — 1,000 萬可運用版
 
-本版在 V6 Professional 基礎上只新增三項外觀功能：
+## 本版修正
 
-1. 字體大小：80%、90%、100%、110%、120%、130%、150%
-2. Light / Dark 主題
-3. 圖表大小：小、中、大
+- 總貸款本金：NT$12,540,000
+- 台新代償舊房貸：NT$2,540,000
+- 實際可運用資金：NT$10,000,000
+- 房貸利息、月付與攤還表：以 NT$12,540,000 計算
+- 投資配置、建倉、戰略現金與壓力測試：以 NT$10,000,000 計算
+- 新增資金運用效率指標：10,000,000 ÷ 12,540,000
+- 移除字體大小、主題切換與圖表大小設定
+- 固定採用白色專業介面
 
-外觀設定會包含在「完整 JSON 備份」中。
+## 更新方式
 
-更新方式：
 1. 解壓縮。
-2. 覆蓋原 GitHub repository 內的 app.py、requirements.txt、README.md 與 .streamlit。
-3. GitHub Desktop：Commit to main → Push origin。
-4. Streamlit Cloud 自動重新部署。
+2. 將 `app.py`、`requirements.txt`、`README.md` 與 `.streamlit` 覆蓋到原 GitHub repository。
+3. 在 GitHub Desktop 按 **Commit to main**。
+4. 按 **Push origin**。
+5. Streamlit Cloud 會自動重新部署。

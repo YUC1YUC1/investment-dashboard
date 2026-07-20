@@ -7,107 +7,63 @@ import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="V6 Professional", page_icon="📊", layout="wide")
+st.set_page_config(page_title="YW Wealth OS", page_icon="📊", layout="wide")
 
 
-def apply_theme(settings):
-    scale = float(settings.get("font_scale", 1.0))
-    mode = settings.get("theme_mode", "Light")
-    chart_size = settings.get("chart_size", "中")
 
-    if mode == "Dark":
-        bg = "#0E1117"
-        sidebar = "#141922"
-        card = "#171D27"
-        border = "#2A3442"
-        text = "#F4F7FB"
-        muted = "#AAB6C5"
-        hero1 = "#1D2A3A"
-        hero2 = "#131A24"
-    else:
-        bg = "#F5F7FB"
-        sidebar = "#FFFFFF"
-        card = "#FFFFFF"
-        border = "#E5EAF2"
-        text = "#183153"
-        muted = "#66758A"
-        hero1 = "#EDF4FF"
-        hero2 = "#FFFFFF"
-
-    chart_height = {"小": 320, "中": 460, "大": 620}.get(chart_size, 460)
-    st.session_state["chart_height"] = chart_height
-
-    st.markdown(f"""
-    <style>
-    html, body, [class*="css"] {{
-        font-size: {16*scale:.1f}px;
-    }}
-    .stApp {{background:{bg}; color:{text};}}
-    .block-container {{padding-top:1rem; padding-bottom:2rem;}}
-    [data-testid="stSidebar"] {{
-        background:{sidebar};
-        border-right:1px solid {border};
-    }}
-    [data-testid="stMetric"] {{
-        background:{card};
-        border:1px solid {border};
-        padding:{18*scale:.1f}px;
-        border-radius:18px;
-        box-shadow:0 8px 22px rgba(20,43,76,.06);
-    }}
-    [data-testid="stMetricLabel"] {{
-        font-weight:700;
-        color:{muted};
-        font-size:{0.95*scale:.2f}rem;
-    }}
-    [data-testid="stMetricValue"] {{
-        font-size:{1.60*scale:.2f}rem;
-        color:{text};
-    }}
-    .hero {{
-        background:linear-gradient(135deg,{hero1},{hero2});
-        border:1px solid {border};
-        border-radius:22px;
-        padding:{22*scale:.1f}px {24*scale:.1f}px;
-        margin:8px 0 18px 0;
-    }}
-    .card {{
-        background:{card};
-        border:1px solid {border};
-        border-radius:18px;
-        padding:{18*scale:.1f}px {20*scale:.1f}px;
-        box-shadow:0 8px 22px rgba(20,43,76,.06);
-        margin-bottom:1rem;
-    }}
-    .green {{color:#248A57; font-weight:800;}}
-    .yellow {{color:#C68900; font-weight:800;}}
-    .orange {{color:#D16800; font-weight:800;}}
-    .red {{color:#C93C3C; font-weight:800;}}
-    .small {{color:{muted}; font-size:{0.88*scale:.2f}rem;}}
-    h1 {{font-size:{2.15*scale:.2f}rem !important; color:{text};}}
-    h2 {{font-size:{1.65*scale:.2f}rem !important; color:{text};}}
-    h3 {{font-size:{1.30*scale:.2f}rem !important; color:{text};}}
-    button, input, textarea, select {{
-        font-size:{1.0*scale:.2f}rem !important;
-    }}
-    [data-testid="stTabs"] button p {{
-        font-size:{1.0*scale:.2f}rem !important;
-    }}
-    div[data-testid="stDataFrame"] {{
-        font-size:{0.95*scale:.2f}rem;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
+st.markdown("""
+<style>
+.stApp {background:#F5F7FB; color:#183153;}
+.block-container {padding-top:1rem; padding-bottom:2rem;}
+[data-testid="stSidebar"] {
+    background:#FFFFFF;
+    border-right:1px solid #E5EAF2;
+}
+[data-testid="stMetric"] {
+    background:#FFFFFF;
+    border:1px solid #E5EAF2;
+    padding:18px;
+    border-radius:18px;
+    box-shadow:0 8px 22px rgba(20,43,76,.06);
+}
+[data-testid="stMetricLabel"] {
+    font-weight:700;
+    color:#66758A;
+}
+[data-testid="stMetricValue"] {
+    color:#183153;
+}
+.hero {
+    background:linear-gradient(135deg,#EDF4FF,#FFFFFF);
+    border:1px solid #E5EAF2;
+    border-radius:22px;
+    padding:22px 24px;
+    margin:8px 0 18px 0;
+}
+.card {
+    background:#FFFFFF;
+    border:1px solid #E5EAF2;
+    border-radius:18px;
+    padding:18px 20px;
+    box-shadow:0 8px 22px rgba(20,43,76,.06);
+    margin-bottom:1rem;
+}
+.green {color:#248A57; font-weight:800;}
+.yellow {color:#C68900; font-weight:800;}
+.orange {color:#D16800; font-weight:800;}
+.red {color:#C93C3C; font-weight:800;}
+.small {color:#66758A; font-size:.88rem;}
+</style>
+""", unsafe_allow_html=True)
 
 
 DEFAULTS = {
-    "loan":12540000.0,"rate":2.5,"years":30,"grace":24,
+    "loan":12540000.0,"usable_funds":10000000.0,"rate":2.5,"years":30,"grace":24,
     "income":170000.0,"fixed":70000.0,"saving":30000.0,
     "voo":.50,"qqq":.20,"tw":.15,"cash":.15,
     "months":6,"completed_months":0,
     "fee":0.1,"bank":"國泰世華","bank_fx":32.33,
     "fx_green":31.5,"fx_yellow":33.0,"fx_orange":34.0,
-    "font_scale":1.0,"theme_mode":"Light","chart_size":"中",
 }
 if "settings" not in st.session_state:
     st.session_state.settings = DEFAULTS.copy()
@@ -159,9 +115,6 @@ def fx_signal(fx,s):
     if fx<=s["fx_orange"]: return "橘燈","本月換匯降至 65%",.65,"orange"
     return "紅燈","非必要可延後換匯",.35,"red"
 
-def size_chart(fig):
-    fig.update_layout(height=st.session_state.get("chart_height",460))
-    return fig
 
 def save_payload():
     return {
@@ -173,25 +126,19 @@ def save_payload():
 
 M=market_data()
 S=st.session_state.settings
-apply_theme(S)
 
 with st.sidebar:
-    st.header("外觀")
-    font_options = {
-        "80%":0.8,"90%":0.9,"100%":1.0,"110%":1.1,
-        "120%":1.2,"130%":1.3,"150%":1.5
-    }
-    current_label = next((k for k,v in font_options.items() if abs(v-float(S.get("font_scale",1.0)))<0.001), "100%")
-    font_label = st.selectbox("字體大小", list(font_options.keys()), index=list(font_options.keys()).index(current_label))
-    S["font_scale"] = font_options[font_label]
-    S["theme_mode"] = st.radio("主題", ["Light","Dark"], horizontal=True, index=0 if S.get("theme_mode","Light")=="Light" else 1)
-    S["chart_size"] = st.selectbox("圖表大小", ["小","中","大"], index=["小","中","大"].index(S.get("chart_size","中")))
-    st.session_state.settings = S
-    st.caption("外觀設定會包含在完整 JSON 備份中。")
-
-    st.divider()
     st.header("核心設定")
-    S["loan"]=st.number_input("貸款本金",value=float(S["loan"]),step=100000.0)
+    S["loan"]=st.number_input("總貸款本金（計息基礎）",value=float(S["loan"]),step=100000.0)
+    S["usable_funds"]=st.number_input(
+        "實際可運用資金",
+        value=float(S.get("usable_funds",10000000.0)),
+        min_value=0.0,
+        max_value=float(S["loan"]),
+        step=100000.0
+    )
+    refinanced_amount=max(0.0,S["loan"]-S["usable_funds"])
+    st.caption(f"其中 NT${refinanced_amount:,.0f} 用於代償舊房貸，不納入投資建倉。")
     S["rate"]=st.number_input("年利率（%）",value=float(S["rate"]),step=.05)
     S["years"]=st.number_input("貸款年限",value=int(S["years"]),min_value=1)
     S["grace"]=st.number_input("寬限期（月）",value=int(S["grace"]),min_value=0)
@@ -239,7 +186,11 @@ market_fx=M["USD/TWD"]["price"] or 32.19
 bank_fx=S["bank_fx"]
 light,fx_text,fx_factor,fx_class=fx_signal(bank_fx,S)
 
-investable=S["loan"]*(1-S["cash"])
+usable_funds=S.get("usable_funds",10000000.0)
+refinanced_amount=max(0.0,S["loan"]-usable_funds)
+capital_efficiency=usable_funds/S["loan"] if S["loan"] else 0
+strategic_cash=usable_funds*S["cash"]
+investable=usable_funds*(1-S["cash"])
 monthly_total=investable/S["months"]
 risky=S["voo"]+S["qqq"]+S["tw"]
 monthly_us_twd=monthly_total*(S["voo"]+S["qqq"])/risky
@@ -251,8 +202,8 @@ qqq_usd=suggested_usd-voo_usd
 twd_needed=suggested_usd*bank_fx
 progress=S["completed_months"]/S["months"] if S["months"] else 0
 
-st.title("槓桿投資管理系統")
-st.caption("V6 Professional｜國泰定期定額、換匯、建倉進度、房貸與風險管理")
+st.title("YW Wealth OS")
+st.caption("1,254 萬總貸款｜1,000 萬可運用資金｜國泰定期定額、換匯、房貸與風險管理")
 
 overall="依原計畫執行"
 overall_class="green"
@@ -270,6 +221,18 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+finance_cols=st.columns(4)
+finance_cols[0].metric("總貸款本金",f"NT${S['loan']:,.0f}",help="利息與月付金均以此金額計算")
+finance_cols[1].metric("實際可運用資金",f"NT${usable_funds:,.0f}",help="可用於投資配置與保留現金的總額")
+finance_cols[2].metric("代償舊房貸",f"NT${refinanced_amount:,.0f}",help="由台新直接清償前一銀行，無法動用")
+finance_cols[3].metric("資金運用效率",f"{capital_efficiency:.1%}",help="實際可運用資金 ÷ 總貸款本金")
+
+st.info(
+    f"你目前負擔 **NT${S['loan']:,.0f}** 的貸款利息，"
+    f"但投資與現金配置只能使用 **NT${usable_funds:,.0f}**；"
+    f"另有 **NT${refinanced_amount:,.0f}** 已用於代償舊房貸。"
+)
+
 market_cols=st.columns(5)
 for col,key in zip(market_cols,["VOO","QQQ","0050","USD/TWD","S&P500"]):
     p,ch=M[key]["price"],M[key]["change"]
@@ -279,10 +242,14 @@ tabs=st.tabs(["🏠 指揮中心","💳 國泰操作清單","📅 進度中心",
 
 with tabs[0]:
     c=st.columns(4)
-    c[0].metric("寬限期月息",f"NT${interest_only:,.0f}")
-    c[1].metric("寬限期後月付",f"NT${monthly_pay:,.0f}")
-    c[2].metric("扣支出後餘額",f"NT${safe_left:,.0f}")
+    c[0].metric("寬限期月息（按1,254萬）",f"NT${interest_only:,.0f}")
+    c[1].metric("寬限期後月付（按1,254萬）",f"NT${monthly_pay:,.0f}")
+    c[2].metric("可運用本金",f"NT${usable_funds:,.0f}")
     c[3].metric("建倉完成率",f"{progress:.0%}")
+    d=st.columns(3)
+    d[0].metric("扣支出後餘額",f"NT${safe_left:,.0f}")
+    d[1].metric("代償舊房貸",f"NT${refinanced_amount:,.0f}")
+    d[2].metric("資金運用效率",f"{capital_efficiency:.1%}")
     st.progress(progress,text=f"已完成 {S['completed_months']} / {S['months']} 個月")
 
 with tabs[1]:
@@ -308,8 +275,8 @@ with tabs[2]:
     remaining_capital=monthly_total*remaining_months
     c=st.columns(3)
     c[0].metric("剩餘月份",remaining_months)
-    c[1].metric("剩餘預計投入",f"NT${remaining_capital:,.0f}")
-    c[2].metric("戰略現金",f"NT${S['loan']*S['cash']:,.0f}")
+    c[1].metric("剩餘預計投入（不含現金）",f"NT${remaining_capital:,.0f}")
+    c[2].metric("戰略現金（取自1,000萬）",f"NT${strategic_cash:,.0f}")
 
 with tabs[3]:
     with st.form("fx_form",clear_on_submit=True):
@@ -362,7 +329,7 @@ with tabs[5]:
         "VOO":holdings.get("VOO",0)*(M["VOO"]["price"] or 690)*bank_fx,
         "QQQ":holdings.get("QQQ",0)*(M["QQQ"]["price"] or 725)*bank_fx,
         "0050":holdings.get("0050",0)*(M["0050"]["price"] or 220),
-        "現金":S["loan"]*S["cash"]
+        "現金":strategic_cash
     }
     targets={"VOO":S["voo"],"QQQ":S["qqq"],"0050":S["tw"],"現金":S["cash"]}
     total=sum(values.values()); rows=[]
@@ -372,28 +339,37 @@ with tabs[5]:
         rows.append([k,v,cur,targets[k],diff,action])
     df=pd.DataFrame(rows,columns=["資產","市值","目前比例","目標比例","偏離","建議"])
     st.dataframe(df,use_container_width=True,hide_index=True)
-    st.plotly_chart(size_chart(px.pie(df,values="市值",names="資產",hole=.5,title="資產配置")),use_container_width=True)
+    st.plotly_chart(px.pie(df,values="市值",names="資產",hole=.5,title="資產配置"),use_container_width=True)
 
 with tabs[6]:
+    m=st.columns(4)
+    m[0].metric("計息本金",f"NT${S['loan']:,.0f}")
+    m[1].metric("可運用資金",f"NT${usable_funds:,.0f}")
+    m[2].metric("代償舊房貸",f"NT${refinanced_amount:,.0f}")
+    m[3].metric("寬限期月息",f"NT${interest_only:,.0f}")
     A=amortization(S["loan"],annual,S["years"]*12,S["grace"])
     yearly=A.assign(年度=((A["月份"]-1)//12)+1).groupby("年度",as_index=False).agg({"利息":"sum","本金":"sum","月付金":"sum","期末本金":"last"})
-    st.plotly_chart(size_chart(px.line(yearly,x="年度",y="期末本金",title="房貸餘額")),use_container_width=True)
+    st.plotly_chart(px.line(yearly,x="年度",y="期末本金",title="房貸餘額"),use_container_width=True)
     st.dataframe(yearly,use_container_width=True,hide_index=True)
 
 with tabs[7]:
     rows=[]
     for drop in [0,-.1,-.2,-.3,-.4,-.5]:
-        assets=investable*(1+drop)+S["loan"]*S["cash"]
+        assets=investable*(1+drop)+strategic_cash
         rows.append([drop,assets,assets-S["loan"],assets/S["loan"]])
-    df=pd.DataFrame(rows,columns=["市場跌幅","總資產","淨資產","資產/貸款"])
+    df=pd.DataFrame(rows,columns=["市場跌幅","可運用資產市值","扣除1,254萬貸款後淨值","資產/貸款"])
     st.dataframe(df,use_container_width=True,hide_index=True)
-    st.plotly_chart(size_chart(px.bar(df,x="市場跌幅",y="淨資產",title="市場下跌壓力")),use_container_width=True)
+    st.plotly_chart(px.bar(df,x="市場跌幅",y="扣除1,254萬貸款後淨值",title="市場下跌壓力"),use_container_width=True)
 
 with tabs[8]:
     L=ledger(st.session_state.trades)
     invested=float(L["台幣成本"].sum()) if not L.empty else 0
     fx_count=len(st.session_state.fx_records)
     report=pd.DataFrame([
+        ["總貸款本金",f"NT${S['loan']:,.0f}"],
+        ["實際可運用資金",f"NT${usable_funds:,.0f}"],
+        ["代償舊房貸",f"NT${refinanced_amount:,.0f}"],
+        ["資金運用效率",f"{capital_efficiency:.1%}"],
         ["已完成建倉月份",f"{S['completed_months']} / {S['months']}"],
         ["累積交易投入",f"NT${invested:,.0f}"],
         ["換匯紀錄筆數",fx_count],
@@ -404,4 +380,4 @@ with tabs[8]:
     ],columns=["項目","內容"])
     st.dataframe(report,use_container_width=True,hide_index=True)
 
-st.caption("V6 的操作建議為規則式試算，不是保證報酬或匯率預測。請定期下載完整備份。")
+st.caption("操作建議為規則式試算，不是保證報酬或匯率預測。房貸利息按總貸款 1,254 萬計算，投資配置按可運用資金 1,000 萬計算。")
